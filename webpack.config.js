@@ -4,7 +4,7 @@ var webpack = require('webpack');
 
 var path = require('path');
 
-const APP_NAME = 'travel-map';
+const APP_NAME = 'solid-actions-editor';
 
 // this will create index.html file containing script
 // source in dist folder dynamically
@@ -20,6 +20,7 @@ try {
     localVariables = require('./local-config.json');
 } catch (e) {}
 const definePlugin = new webpack.DefinePlugin({
+    process: {env: {}, browser: true},
     PROXY_URL: (localVariables && JSON.stringify(localVariables.proxyUrl)) || false
 });
 
@@ -48,12 +49,15 @@ module.exports = {
         // this is required to be able to do non relative imports of src code
         modules: [path.resolve('./src'), path.resolve('./node_modules')],
         // Add `.ts` and `.tsx` as a resolvable extension.
-        extensions: ['.ts', '.tsx', '.js']
+        extensions: ['.ts', '.tsx', '.js'],
+        fallback: {
+            util: false,
+            buffer:  require.resolve("buffer/")
+        },
     },
     target: 'web',
     devtool: 'source-map',
     module: {
-        // consists the transform configuration
         rules: [
             {
                 test: /\.tsx?$/,
@@ -84,23 +88,24 @@ module.exports = {
     // and will also provide live reload functionality
     devServer: {
         host: '0.0.0.0',
-        contentBase: path.join(__dirname, 'dist'),
+      static: {
+        directory: path.join(__dirname, 'dist'),
+      },
         compress: true,
         port: 8000,
         // needed to properly support BrowsrRouter
         // see https://stackoverflow.com/questions/43209666/react-router-v4-cannot-get-url
-        historyApiFallback: true,
-        https: true
+        historyApiFallback: {
+          disableDotRule: true,
+        },
+        https: true,
     },
 
     // this will watch the bundle for any changes
     //watch: true,
     // specify the plugins which you are using
     plugins: [
-        htmlPlugin, 
-        definePlugin,
-        new CopyWebpackPlugin([
-            { from: 'static' }
-        ]),
+        htmlPlugin,
+        definePlugin
     ]
 };

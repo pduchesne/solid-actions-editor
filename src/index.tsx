@@ -1,10 +1,11 @@
 import * as ReactDOM from "react-dom";
 import * as React from "react";
 import "main.scss";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoginButton, SessionProvider, useFile, useSession } from "@inrupt/solid-ui-react";
 import * as rdflib from "rdflib";
 import { PromiseContainer } from "./utils";
+import * as monaco from "monaco-editor";
 
 import {
   getSolidDataset,
@@ -190,6 +191,53 @@ export const App = () => {
       <MainPage />
     </SessionProvider>
   );
+};
+
+
+export const MONACO_TYPE_MAP = {
+  "text/turtle": "turtle",
+  "application/json": "json",
+  default: undefined
+};
+
+export const MonacoEditor = (props: { text: string, contentType?: string, onChange?: (newText: string) => void }) => {
+  const divEl = useRef<HTMLDivElement>(null);
+  const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor>();
+
+  useEffect(() => {
+    if (divEl.current) {
+
+      editor?.dispose();
+      const newEditor = monaco.editor.create(divEl.current, {
+        theme: "turtleTheme",
+        value: props.text,
+        language: MONACO_TYPE_MAP[props.contentType || "default"]
+      });
+      newEditor.onDidChangeModelContent((e) => {
+        props.onChange && props.onChange(newEditor.getValue());
+        //(editor.getModel() as any).rdfGraph = parseRdf(editor.getValue());
+      });
+      //(editor.getModel() as any).rdfGraph = parseRdf(props.text);
+
+      newEditor.focus();
+
+      setEditor(newEditor);
+
+      return () => {
+        newEditor.dispose();
+      };
+    } else {
+      return;
+    }
+  }, [divEl.current, props.onChange]);
+
+  useEffect(() => {
+    editor?.setValue(props.text);
+  }, [props.text, editor]);
+
+
+  return <div className="Editor" ref={divEl}
+              style={{ width: "800px", height: "600px", border: "1px solid #ccc" }}></div>;
 };
 
 ReactDOM.render(<App />, document.getElementById("index"));
