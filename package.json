@@ -8,7 +8,7 @@
         "prettier": "prettier --write ./src",
         "start": "webpack serve --profile --progress --mode development",
         "build": "yarn run --silent clean && node --max_old_space_size=4096 node_modules/.bin/webpack",
-        "build-pages": "yarn run build && shx cp -R ./dist ./pages"
+        "build-pages": "yarn run build && shx rm -rf ./pages && shx mkdir ./pages && shx cp -R ./dist/** ./pages"
     },
     "keywords": [],
     "author": "phd@highlatitud.es",
