@@ -27,76 +27,142 @@ function parseRdf(str: string, baseUrl: string, contentType: string) {
 }
 
 export const EditFile = (props: { fileUri: string }) => {
+  const { session } = useSession();
+
   const file = useFile(props.fileUri);
 
-  const [currentContent, setCurrentContent] = useState<string>();
+  const [currentContent, setCurrentContent] = useState<{ content: string, type: string }>();
+  const [isDirty, setDirty] = useState<boolean>(false);
 
   // fetch the file content as text (too bad if it's binary)
   useEffect(() => {
     if (file.data) {
-      file.data.text().then(setCurrentContent);
+      file.data.text().then((content) => setCurrentContent({
+        content,
+        type: file.data?.type || "text/plain"
+      }));
     } else {
       setCurrentContent(undefined);
     }
-  }, [file]);
+  }, [file.data]);
+
+  const modifyContent = useCallback((content?: string, type?: string) => {
+    setCurrentContent((prevContent) => ({
+      content: content == undefined ? (prevContent?.content || "") : content,
+      type: type == undefined ? (prevContent?.type || "text/plain") : type
+    }));
+
+    setDirty(true);
+  }, []);
+
+  const saveFile = useCallback((content: { content: string, type: string }) => {
+    session.fetch(props.fileUri, {
+      method: "PUT",
+      body: content.content,
+      headers: {
+        "Content-Type": content.type
+      }
+    });
+  }, [session, props.fileUri]);
+
+  const saveGraph = useCallback((graph: rdflib.Store) => {
+    const turtleStr = graph.serialize(props.fileUri, "application/n-triples", null);
+    modifyContent(turtleStr);
+  }, [props.fileUri, modifyContent]);
 
   // try to parse the content as rdf
   const graph = useMemo(() => {
-    const contentType = file.data?.type;
     try {
       // if we have a mime type supported by rdflib, try to parse it
-      if (currentContent && contentType && ["text/turtle", "application/n-triples", "text/n3", "application/n-quads", "application/rdf+xml"].includes(contentType))
-        return parseRdf(currentContent, props.fileUri, contentType);
+      if (currentContent?.type && ["text/turtle", "application/n-triples", "text/n3", "application/n-quads", "application/rdf+xml"].includes(currentContent?.type))
+        return parseRdf(currentContent.content, props.fileUri, currentContent?.type);
       else
         return undefined;
     } catch (e) {
       return undefined;
     }
-  }, [currentContent, file.data?.type]);
+  }, [currentContent]);
 
   // check if there are any schema.org/Action entities in this graph (if it is a graph at all)
   const hasActions = useMemo(() => {
     return !!graph?.statementsMatching(null, rdflib.namedNode("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"), rdflib.namedNode("https://schema.org/Action")).length;
   }, [graph]);
 
-  return <div>
-    {
-      graph && hasActions ?
-        <EditActions graph={graph} /> :
-        <pre>
-          {currentContent}
-        </pre>
-    }
+  const [displayActionsEditor, setDisplayActionsEditor] = useState<boolean>(hasActions);
 
+  return <div>
+    <select value={currentContent?.type} onChange={(e) => modifyContent(undefined, e.currentTarget.value)}>
+      <option>text/plain</option>
+      <option>application/json</option>
+      <option>text/turtle</option>
+    </select>
+    {isDirty ? <button onClick={() => currentContent && saveFile(currentContent)}>Save</button> : null}
+    {hasActions ? <button onClick={() => setDisplayActionsEditor(!displayActionsEditor)}>Toggle Editor</button> : null}
+    {
+      graph && displayActionsEditor ?
+        <EditActions graph={graph} onChange={saveGraph} /> :
+        currentContent ? <MonacoEditor text={currentContent.content} onChange={modifyContent}
+                                       contentType={currentContent.type} /> : null
+    }
   </div>;
 };
 
 
-export const EditActions = (props: { graph: rdflib.Store }) => {
+export const EditActions = (props: { graph: rdflib.Store, onChange: (graph: rdflib.Store) => void }) => {
 
   const actions = useMemo(() => {
     return props.graph?.statementsMatching(null, rdflib.namedNode("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"), rdflib.namedNode("https://schema.org/Action")).map(st => st.subject);
   }, [props.graph]);
 
   return <table>
-    {actions ? actions.map(a => <EditAction key={a.value} graph={props.graph} actionUri={a.value}/>) : null}
+    <tbody>
+    <tr>
+      <th>Type</th>
+      <th>Time</th>
+      <th>Track</th>
+      <th>Album</th>
+      <th>Artist</th>
+    </tr>
+    {actions ? actions.map(a => <EditAction key={a.value} graph={props.graph} actionUri={a.value}
+                                            onChange={props.onChange} />) : null}
+    </tbody>
   </table>;
 };
 
-export const EditAction = (props: { graph: rdflib.Store, actionUri: string }) => {
+export const EditAction = (props: { graph: rdflib.Store, actionUri: string, onChange: (graph: rdflib.Store) => void }) => {
 
   const actionProperties = useMemo(() => {
+    const objectUri = props.graph?.anyValue(rdflib.namedNode(props.actionUri), rdflib.namedNode("https://schema.org/object")) || undefined;
+    const name = objectUri && props.graph?.anyValue(rdflib.namedNode(objectUri), rdflib.namedNode("https://schema.org/name")) || undefined;
+
     return {
-      type: props.graph?.anyValue(rdflib.namedNode(props.actionUri), rdflib.namedNode("https://schema.org/additionalType")) || null,
-      object: props.graph?.anyValue(rdflib.namedNode(props.actionUri), rdflib.namedNode("https://schema.org/object")) || null,
-      time: props.graph?.anyValue(rdflib.namedNode(props.actionUri), rdflib.namedNode("https://schema.org/startTime")) || null
-    }
+      type: props.graph?.anyValue(rdflib.namedNode(props.actionUri), rdflib.namedNode("https://schema.org/additionalType")) || undefined,
+      object: {
+        name
+      },
+      time: props.graph?.anyValue(rdflib.namedNode(props.actionUri), rdflib.namedNode("https://schema.org/startTime")) || undefined
+    };
   }, [props.graph, props.actionUri]);
 
+
+  const setType = useCallback((type: string) => {
+    props.graph?.removeMatches(rdflib.namedNode(props.actionUri), rdflib.namedNode("https://schema.org/additionalType"));
+    props.graph?.add(rdflib.namedNode(props.actionUri), rdflib.namedNode("https://schema.org/additionalType"), rdflib.namedNode(type));
+
+    props.onChange(props.graph);
+  }, []);
+
+
   return <tr>
-    <td>{actionProperties.type}</td>
+    <td>
+      <select value={actionProperties.type} onChange={(e) => setType(e.currentTarget.value)}>
+        <option>https://schema.org/BookmarkAction</option>
+        <option>https://schema.org/LikeAction</option>
+        <option>https://schema.org/FollowAction</option>
+      </select>
+    </td>
     <td>{actionProperties.time}</td>
-    <td>{actionProperties.object}</td>
+    <td>{actionProperties.object.name}</td>
   </tr>;
 };
 
@@ -164,7 +230,8 @@ export const BrowseContent = (props: { uri?: string }) => {
 
   return <div>
     <h3>
-      <a onClick={() => setCurrentUri(new URL(isFolder ? ".." : ".", currentUri).toString())}>[..]</a> {isFolder ? "📁" : "📄"} {currentUri}
+      <a
+        onClick={() => setCurrentUri(new URL(isFolder ? ".." : ".", currentUri).toString())}>[..]</a> {isFolder ? "📁" : "📄"} {currentUri}
     </h3>
     {isFolder ?
       <DisplayFolder folderUri={currentUri!} onSelect={setCurrentUri} /> :
