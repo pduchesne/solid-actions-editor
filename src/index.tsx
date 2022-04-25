@@ -245,8 +245,9 @@ export const MainPage = () => {
   return <div>
     <h2>Solid browser for media actions</h2>
     {session.info.isLoggedIn ? <BrowseContent /> : <LoginButton
+      // currently hardcoded to inrupt.net provider
       oidcIssuer="https://inrupt.net"
-      redirectUrl="https://localhost:8000/"
+      redirectUrl={window.location.toString()}
     />}
   </div>;
 };
